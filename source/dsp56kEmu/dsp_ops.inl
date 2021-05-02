@@ -265,9 +265,9 @@ namespace dsp56k
 	}
 	inline void DSP::op_Dor_xxx(const TWord op)
 	{
-        const auto loopcount = getFieldValue<Dor_xxx,Field_hhhh, Field_iiiiiiii>(op);
-        const auto displacement = pcRelativeAddressExt<Dor_xxx>();
-        do_exec(loopcount, pcCurrentInstruction + displacement);
+		const auto loopcount = getFieldValue<Dor_xxx,Field_hhhh, Field_iiiiiiii>(op);
+		const auto displacement = pcRelativeAddressExt<Dor_xxx>();
+		do_exec(loopcount, pcCurrentInstruction + displacement);
 	}
 	inline void DSP::op_Dor_S(const TWord op)
 	{
@@ -292,10 +292,7 @@ namespace dsp56k
 			const auto backupCCR = ccr();
 
 			const auto& cacheEntry = m_opcodeCache[pcCurrentInstruction];
-			const auto instAlu = static_cast<Instruction>((cacheEntry >> 8) & 0xff);
-
-			exec_jump(instAlu, op);
-
+			(this->*m_opcodeCache[pcCurrentInstruction].opMove)(op);
 			ccr(backupCCR);
 		}
 	}
@@ -304,9 +301,7 @@ namespace dsp56k
 		if( checkCondition<Ifcc_U>(op) )
 		{
 			const auto& cacheEntry = m_opcodeCache[pcCurrentInstruction];
-			const auto instAlu = static_cast<Instruction>((cacheEntry >> 8) & 0xff);
-
-			exec_jump(instAlu, op);
+			(this->*cacheEntry.opMove)(op);
 		}
 	}
 	inline void DSP::op_Illegal(const TWord op)
@@ -492,7 +487,7 @@ namespace dsp56k
 	inline void DSP::op_ResolveCache(const TWord op)
 	{
 		auto& cacheEntry = m_opcodeCache[pcCurrentInstruction];
-		cacheEntry = Nop;
+		cacheEntry.op = &dsp56k::DSP::op_Nop;
 
 		if( !op )
 		{
@@ -510,9 +505,9 @@ namespace dsp56k
 				assert(0 && "illegal instruction");
 			}
 
-			cacheEntry = resolvePermutation(oi->m_instruction, op);
-
-			exec_jump(cacheEntry, op);
+			auto inst = resolvePermutation(oi->m_instruction, op);
+			cacheEntry.op = g_jumptable.jumptable()[inst];
+			(this->*cacheEntry.op)(op);
 			return;
 		}
 		const auto* oiMove = m_opcodes.findParallelMoveOpcodeInfo(op);
@@ -540,8 +535,9 @@ namespace dsp56k
 			// Only ALU, no parallel move
 			if(oiAlu)
 			{
-				cacheEntry = resolvePermutation(oiAlu->m_instruction, op);
-				exec_jump(cacheEntry, op);
+				auto inst = resolvePermutation(oiAlu->m_instruction, op);
+				cacheEntry.op = g_jumptable.jumptable()[inst];                
+				(this->*cacheEntry.op)(op);
 			}
 			else
 			{
@@ -553,9 +549,11 @@ namespace dsp56k
 			// IFcc executes the ALU instruction if the condition is met, therefore no ALU exec by us
 			if(oiAlu)
 			{
-				const auto moveFunc = resolvePermutation(oiMove->m_instruction, op);
-				cacheEntry = moveFunc | (resolvePermutation(oiAlu->m_instruction, op) << 8);
-				exec_jump(moveFunc, op);
+				auto instMove = resolvePermutation(oiMove->m_instruction, op);
+				auto instAlu = resolvePermutation(oiAlu->m_instruction, op);
+				cacheEntry.op = g_jumptable.jumptable()[instMove];
+				cacheEntry.opMove = g_jumptable.jumptable()[instAlu];
+				(this->*cacheEntry.op)(op);
 			}
 			else
 			{
@@ -566,13 +564,18 @@ namespace dsp56k
 			if(!oiAlu)
 			{
 				// if there is no ALU instruction, do only a move
-				cacheEntry = resolvePermutation(oiMove->m_instruction, op);
-				exec_jump(cacheEntry, op);
+				auto instMove = resolvePermutation(oiMove->m_instruction, op);
+				cacheEntry.op = g_jumptable.jumptable()[instMove];
+				(this->*cacheEntry.op)(op);
 			}
 			else
 			{
 				// call special function that simulates latch registers for alu op + parallel move
-				cacheEntry = Parallel | resolvePermutation(oiMove->m_instruction, op) << 8 | resolvePermutation(oiAlu->m_instruction, op) << 16;
+				auto instMove = resolvePermutation(oiMove->m_instruction, op);
+				auto instAlu = resolvePermutation(oiAlu->m_instruction, op);
+				cacheEntry.op = &DSP::op_Parallel;
+				cacheEntry.opMove = g_jumptable.jumptable()[instMove];
+				cacheEntry.opAlu = g_jumptable.jumptable()[instAlu];
 				op_Parallel(op);
 			}
 		}
@@ -581,9 +584,8 @@ namespace dsp56k
 	inline void DSP::op_Parallel(const TWord op)
 	{
 		const auto& cacheEntry = m_opcodeCache[pcCurrentInstruction];
-		const auto instMove = static_cast<Instruction>((cacheEntry >> 8) & 0xff);
-		const auto instAlu = static_cast<Instruction>((cacheEntry >> 16) & 0xff);
-
+		const auto instMove = m_opcodeCache[pcCurrentInstruction].opMove;
+		const auto instAlu = m_opcodeCache[pcCurrentInstruction].opAlu;
 		exec_parallel(instMove, instAlu, op);
 	}
 }

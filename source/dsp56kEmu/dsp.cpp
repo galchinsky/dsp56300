@@ -13,6 +13,12 @@
 #include "dspconfig.h"
 
 #include "dsp_decode.inl"
+#include "dsp_jumptable.inl"
+
+namespace dsp56k
+{
+	Jumptable g_jumptable;
+}
 
 #include "dsp_ops.inl"
 #include "dsp_ops_alu.inl"
@@ -20,7 +26,7 @@
 #include "dsp_ops_jmp.inl"
 #include "dsp_ops_move.inl"
 
-#include "dsp_jumptable.inl"
+
 
 #if 0
 #	define LOGSC(F)	logSC(F)
@@ -34,8 +40,6 @@ namespace dsp56k
 {
 	constexpr bool g_traceSupported = false;
 
-	Jumptable g_jumptable;
-
 	// _____________________________________________________________________________
 	// DSP
 	//
@@ -48,7 +52,7 @@ namespace dsp56k
 		mem.setDSP(this);
 
 		m_disasm.addSymbols(mem);
-		
+
 		perif[0]->setDSP(this);
 		perif[1]->setDSP(this);
 
@@ -219,9 +223,7 @@ namespace dsp56k
 		m_currentOpLen = 1;
 
 		const TWord currentOp = pcCurrentInstruction;
-		const auto opCache = m_opcodeCache[currentOp];
-
-		exec_jump(static_cast<Instruction>(opCache & 0xff), op);
+		(this->*m_opcodeCache[currentOp].op)(op);
 
 		++m_instructions;
 
@@ -235,7 +237,7 @@ namespace dsp56k
 		(this->*func)(op);
 	}
 
-	bool DSP::exec_parallel(const Instruction instMove, const Instruction instAlu, const TWord op)
+	bool DSP::exec_parallel(const TInstructionFunc instMove, const TInstructionFunc instAlu, const TWord op)
 	{
 		// simulate latches registers for parallel instructions
 		const auto preMoveX = reg.x;
@@ -243,7 +245,7 @@ namespace dsp56k
 		const auto preMoveA = reg.a;
 		const auto preMoveB = reg.b;
 
-		exec_jump(instMove, op);
+		(this->*instMove)(op);
 
 		const auto postMoveX = reg.x;
 		const auto postMoveY = reg.y;
@@ -256,7 +258,7 @@ namespace dsp56k
 		reg.a = preMoveA;
 		reg.b = preMoveB;
 
-		exec_jump(instAlu, op);
+		(this->*instAlu)(op);
 
 		// now check what has changed and get the final values for all registers
 		if( postMoveX != preMoveX )
@@ -400,7 +402,7 @@ namespace dsp56k
 		pushPCSR();
 
 		const auto stackCount = reg.sc.var;
-		
+
 		sr_set( SR_LF );
 
 		traceOp();
@@ -464,7 +466,7 @@ namespace dsp56k
 
 		const auto opCache = m_opcodeCache[pcCurrentInstruction];
 
-		const auto func = g_opcodeFuncs[static_cast<Instruction>(opCache & 0xff)];
+		const auto func = opCache.op;
 
 		while( reg.lc.var > 0 )
 		{
@@ -717,7 +719,7 @@ namespace dsp56k
 	bool DSP::writeReg( EReg _reg, const TReg24& _res )
 	{
 		assert( (_res.var & 0xff000000) == 0 );
-			
+
 		switch( _reg )
 		{
 		case Reg_N0:	reg.n[0] = _res;	break;
@@ -728,7 +730,7 @@ namespace dsp56k
 		case Reg_N5:	reg.n[5] = _res;	break;
 		case Reg_N6:	reg.n[6] = _res;	break;
 		case Reg_N7:	reg.n[7] = _res;	break;
-							
+
 		case Reg_R0:	reg.r[0] = _res;	break;
 		case Reg_R1:	reg.r[1] = _res;	break;
 		case Reg_R2:	reg.r[2] = _res;	break;
@@ -737,7 +739,7 @@ namespace dsp56k
 		case Reg_R5:	reg.r[5] = _res;	break;
 		case Reg_R6:	reg.r[6] = _res;	break;
 		case Reg_R7:	reg.r[7] = _res;	break;
-							
+
 		case Reg_M0:	reg.m[0] = _res;	break;
 		case Reg_M1:	reg.m[1] = _res;	break;
 		case Reg_M2:	reg.m[2] = _res;	break;
@@ -746,15 +748,15 @@ namespace dsp56k
 		case Reg_M5:	reg.m[5] = _res;	break;
 		case Reg_M6:	reg.m[6] = _res;	break;
 		case Reg_M7:	reg.m[7] = _res;	break;
-							
+
 		case Reg_A0:	a0(_res);		break;
 		case Reg_A1:	a1(_res);		break;
 		case Reg_B0:	b0(_res);		break;
 		case Reg_B1:	b1(_res);		break;
-							
+
 		case Reg_X0:	x0(_res);		break;
 		case Reg_X1:	x1(_res);		break;
-							
+
 		case Reg_Y0:	y0(_res);		break;
 		case Reg_Y1:	y1(_res);		break;
 
@@ -793,81 +795,81 @@ namespace dsp56k
 		readReg( Reg_A, _regs.a);
 		readReg( Reg_B, _regs.b);
 
-		readReg( Reg_X0, _regs.x0);		
-		readReg( Reg_X1, _regs.x1);		
+		readReg( Reg_X0, _regs.x0);
+		readReg( Reg_X1, _regs.x1);
 
-		readReg( Reg_Y0, _regs.y0);		
-		readReg( Reg_Y1, _regs.y1);		
+		readReg( Reg_Y0, _regs.y0);
+		readReg( Reg_Y1, _regs.y1);
 
-		readReg( Reg_A0, _regs.a0);		
-		readReg( Reg_A1, _regs.a1);		
-		readReg( Reg_A2, _regs.a2);		
+		readReg( Reg_A0, _regs.a0);
+		readReg( Reg_A1, _regs.a1);
+		readReg( Reg_A2, _regs.a2);
 
-		readReg( Reg_B0, _regs.b0);		
-		readReg( Reg_B1, _regs.b1);		
-		readReg( Reg_B2, _regs.b2);		
+		readReg( Reg_B0, _regs.b0);
+		readReg( Reg_B1, _regs.b1);
+		readReg( Reg_B2, _regs.b2);
 
-		readReg( Reg_PC, _regs.pc);		
-		readReg( Reg_SR, _regs.sr);		
-		readReg( Reg_OMR, _regs.omr);	
+		readReg( Reg_PC, _regs.pc);
+		readReg( Reg_SR, _regs.sr);
+		readReg( Reg_OMR, _regs.omr);
 
-		readReg( Reg_LA, _regs.la);		
-		readReg( Reg_LC, _regs.lc);		
+		readReg( Reg_LA, _regs.la);
+		readReg( Reg_LC, _regs.lc);
 
-		readReg( Reg_SSH, _regs.ssh);	
-		readReg( Reg_SSL, _regs.ssl);	
-		readReg( Reg_SP, _regs.sp);		
+		readReg( Reg_SSH, _regs.ssh);
+		readReg( Reg_SSL, _regs.ssl);
+		readReg( Reg_SP, _regs.sp);
 
-		readReg( Reg_EP, _regs.ep);		
-		readReg( Reg_SZ, _regs.sz);		
-		readReg( Reg_SC, _regs.sc);		
-		readReg( Reg_VBA, _regs.vba);	
+		readReg( Reg_EP, _regs.ep);
+		readReg( Reg_SZ, _regs.sz);
+		readReg( Reg_SC, _regs.sc);
+		readReg( Reg_VBA, _regs.vba);
 
-		readReg( Reg_IPRC, _regs.iprc);	
-		readReg( Reg_IPRP, _regs.iprp);	
-		readReg( Reg_BCR, _regs.bcr);	
-		readReg( Reg_DCR, _regs.dcr);	
+		readReg( Reg_IPRC, _regs.iprc);
+		readReg( Reg_IPRP, _regs.iprp);
+		readReg( Reg_BCR, _regs.bcr);
+		readReg( Reg_DCR, _regs.dcr);
 
-		readReg( Reg_AAR0, _regs.aar0);	
-		readReg( Reg_AAR1, _regs.aar1);	
-		readReg( Reg_AAR2, _regs.aar2);	
-		readReg( Reg_AAR3, _regs.aar3);	
+		readReg( Reg_AAR0, _regs.aar0);
+		readReg( Reg_AAR1, _regs.aar1);
+		readReg( Reg_AAR2, _regs.aar2);
+		readReg( Reg_AAR3, _regs.aar3);
 
-		readReg( Reg_R0, _regs.r0);		
-		readReg( Reg_R1, _regs.r1);		
-		readReg( Reg_R2, _regs.r2);		
-		readReg( Reg_R3, _regs.r3);		
-		readReg( Reg_R4, _regs.r4);		
-		readReg( Reg_R5, _regs.r5);		
-		readReg( Reg_R6, _regs.r6);		
-		readReg( Reg_R7, _regs.r7);		
+		readReg( Reg_R0, _regs.r0);
+		readReg( Reg_R1, _regs.r1);
+		readReg( Reg_R2, _regs.r2);
+		readReg( Reg_R3, _regs.r3);
+		readReg( Reg_R4, _regs.r4);
+		readReg( Reg_R5, _regs.r5);
+		readReg( Reg_R6, _regs.r6);
+		readReg( Reg_R7, _regs.r7);
 
-		readReg( Reg_N0, _regs.n0);		
-		readReg( Reg_N1, _regs.n1);		
-		readReg( Reg_N2, _regs.n2);		
-		readReg( Reg_N3, _regs.n3);		
-		readReg( Reg_N4, _regs.n4);		
-		readReg( Reg_N5, _regs.n5);		
-		readReg( Reg_N6, _regs.n6);		
-		readReg( Reg_N7, _regs.n7);		
+		readReg( Reg_N0, _regs.n0);
+		readReg( Reg_N1, _regs.n1);
+		readReg( Reg_N2, _regs.n2);
+		readReg( Reg_N3, _regs.n3);
+		readReg( Reg_N4, _regs.n4);
+		readReg( Reg_N5, _regs.n5);
+		readReg( Reg_N6, _regs.n6);
+		readReg( Reg_N7, _regs.n7);
 
-		readReg( Reg_M0, _regs.m0);		
-		readReg( Reg_M1, _regs.m1);		
-		readReg( Reg_M2, _regs.m2);		
-		readReg( Reg_M3, _regs.m3);		
-		readReg( Reg_M4, _regs.m4);		
-		readReg( Reg_M5, _regs.m5);		
-		readReg( Reg_M6, _regs.m6);		
-		readReg( Reg_M7, _regs.m7);		
+		readReg( Reg_M0, _regs.m0);
+		readReg( Reg_M1, _regs.m1);
+		readReg( Reg_M2, _regs.m2);
+		readReg( Reg_M3, _regs.m3);
+		readReg( Reg_M4, _regs.m4);
+		readReg( Reg_M5, _regs.m5);
+		readReg( Reg_M6, _regs.m6);
+		readReg( Reg_M7, _regs.m7);
 
-		readReg( Reg_HIT, _regs.hit);		
-		readReg( Reg_MISS, _regs.miss);		
-		readReg( Reg_REPLACE, _regs.replace);	
-		readReg( Reg_CYC, _regs.cyc);		
-		readReg( Reg_ICTR, _regs.ictr);		
-		readReg( Reg_CNT1, _regs.cnt1);		
-		readReg( Reg_CNT2, _regs.cnt2);		
-		readReg( Reg_CNT3, _regs.cnt3);		
+		readReg( Reg_HIT, _regs.hit);
+		readReg( Reg_MISS, _regs.miss);
+		readReg( Reg_REPLACE, _regs.replace);
+		readReg( Reg_CYC, _regs.cyc);
+		readReg( Reg_ICTR, _regs.ictr);
+		readReg( Reg_CNT1, _regs.cnt1);
+		readReg( Reg_CNT2, _regs.cnt2);
+		readReg( Reg_CNT3, _regs.cnt3);
 		readReg( Reg_CNT4, _regs.cnt4);
 	}
 
@@ -888,12 +890,12 @@ namespace dsp56k
 	bool DSP::memWrite( EMemArea _area, TWord _offset, TWord _value )
 	{
 		aarTranslate(_area, _offset);
-	
+
 		const auto res = mem.dspWrite( _area, _offset, _value );
 
 //		if(_area == MemArea_P)	does not work for external memory
 		if(_offset < m_opcodeCache.size())
-			m_opcodeCache[_offset] = ResolveCache;
+			m_opcodeCache[_offset].op = &DSP::op_ResolveCache;
 
 		return res;
 	}
@@ -922,7 +924,7 @@ namespace dsp56k
 	// 	if( _area == MemArea_P && sr_test(SR_CE) )
 	// 	{
 	// 		const bool ms = (reg.omr.var & OMR_MS) != 0;
-	// 
+	//
 	// 		if( !ms )
 	// 		{
 	// 			if( _offset >= 0x000800 && _offset < 0x000c00 )
@@ -1047,7 +1049,7 @@ namespace dsp56k
 
 		auto d64 = d.signextend<TInt64>();
 		d64 = -d64;
-		
+
 		d.var = d64 & 0x00ffffffffffffff;
 
 		sr_s_update();
@@ -1111,14 +1113,14 @@ namespace dsp56k
 	void DSP::clearOpcodeCache()
 	{
 		m_opcodeCache.clear();
-		m_opcodeCache.resize(mem.size(), ResolveCache);		
+		m_opcodeCache.resize(mem.size(), {&DSP::op_ResolveCache});
 	}
 
 	void DSP::clearOpcodeCache(TWord _address)
 	{
-		m_opcodeCache[_address] = ResolveCache;
+		m_opcodeCache[_address].op = &DSP::op_ResolveCache;
 	}
-	
+
 	TWord DSP::resolvePermutation(const Instruction _inst, const TWord _op) const
 	{
 		return g_jumptable.resolve(_inst, _op);
@@ -1174,11 +1176,11 @@ namespace dsp56k
 /*
    x=       $000000000000    y=       $000000000000
    a=     $00000000000051    b=     $00000000000000
-               x1=$000000   x0=$000000   r7=$000000 n7=$000000 m7=$ffffff
-               y1=$000000   y0=$000000   r6=$000000 n6=$000000 m6=$ffffff
+		x1=$000000   x0=$000000   r7=$000000 n7=$000000 m7=$ffffff
+		y1=$000000   y0=$000000   r6=$000000 n6=$000000 m6=$ffffff
   a2=    $00   a1=$000000   a0=$000051   r5=$000000 n5=$000000 m5=$ffffff
   b2=    $00   b1=$000000   b0=$000000   r4=$000000 n4=$000000 m4=$ffffff
-                                         r3=$000000 n3=$000000 m3=$ffffff
+					  r3=$000000 n3=$000000 m3=$ffffff
   pc=$000102   sr=$c00300  omr=$00030e   r2=$000000 n2=$000000 m2=$ffffff
   la=$ffffff   lc=$000000                r1=$000100 n1=$000000 m1=$ffffff
  ssh=$000000  ssl=$000000   sp=$000000   r0=$000151 n0=$000000 m0=$ffffff

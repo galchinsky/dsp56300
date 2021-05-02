@@ -13,6 +13,8 @@ namespace dsp56k
 	class Memory;
 	class UnitTests;
 
+	using TInstructionFunc = void (DSP::*)(TWord op);
+
 	class DSP final
 	{
 		friend class UnitTests;
@@ -105,7 +107,14 @@ namespace dsp56k
 		RingBuffer<TWord, 1024, false>	m_pendingInterrupts;	// TODO: array is way too large
 
 		Opcodes							m_opcodes;
-		std::vector<uint32_t>			m_opcodeCache;
+
+		struct OpcodeData {
+			TInstructionFunc op;
+			TInstructionFunc opMove;
+			TInstructionFunc opAlu;
+		};
+
+		std::vector<OpcodeData>			m_opcodeCache;
 		
 		InstructionCache				cache;
 
@@ -226,7 +235,7 @@ namespace dsp56k
 
 		void	exec_jump						(TWord _inst, TWord op);
 		
-		bool	exec_parallel					(Instruction instMove, Instruction instAlu, TWord op);
+		bool	exec_parallel					(TInstructionFunc instMove, TInstructionFunc instAlu, TWord op);
 
 		bool	alu_multiply					(TWord op);
 
@@ -369,10 +378,10 @@ namespace dsp56k
 			sr_toggle( SR_Z, zero == _ab );
 		}
 
- 		void	sr_c_update_logical( const TReg56& _ab )
- 		{
- 			sr_toggle( SRB_C, bitvalue<55>(_ab) );
- 		}
+		void	sr_c_update_logical( const TReg56& _ab )
+		{
+			sr_toggle( SRB_C, bitvalue<55>(_ab) );
+		}
 
 		template<typename T>
 		void	sr_c_update_arithmetic( const T& _old, const T& _new )
